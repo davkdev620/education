@@ -11,6 +11,10 @@ from django.forms.models import modelform_factory
 from django.apps import apps
 from .models import Module, Content
 from braces.views import CsrfExemptMixin, JsonRequestResponseMixin
+from django.db.models import Count
+from .models import Subject
+from django.views.generic.detail import DetailView
+from students.forms import CourseEnrollForm
 
 
 class OwnerMixin(object):
@@ -36,7 +40,7 @@ class OwnerCourseEditMixin(OwnerCourseMixin, OwnerEditMixin):
 
 
 class ManageCourseListView(OwnerCourseMixin, ListView):
-    template_name = 'courses/manage/course/list.html'
+    template_name = 'courses/manage/course/templates/courses/course/list.html'
     permission_required = 'courses.view_course'
 
 
@@ -180,3 +184,40 @@ class ContentOrderView(CsrfExemptMixin, JsonRequestResponseMixin, View):
             Content.objects.filter(id=id,
                                    module__course__owner=request.user).update(order=order)
         return self.render_json_response({'saved': 'OK'})
+
+
+class CourseListView(TemplateResponseMixin, View):
+    model = Course
+    template_name = 'courses/course/list.html'
+
+    def get(self, request, subject=None):
+        # Retrieve all subjects, aggregation function to include the total number of courses for each subject.
+        subjects = Subject.objects.annotate(
+            total_courses=Count('courses'))
+
+        courses = Course.objects.annotate(
+            total_modules=Count('modules'))
+
+        if subject:
+            subject = get_object_or_404(Subject, slug=subject)
+            courses = courses.filter(subject=subject)
+        # Render the objects to a template and return an HTTP response.
+        return self.render_to_response({'subjects': subjects,
+                                        'subject': subject,
+                                        'courses': courses})
+
+
+# Detail view for displaying a single course overview.
+# DetailView expects a primary key (pk) or slug URL parameter to retrieve a single object for the given model.
+class CourseDetailView(DetailView):
+    model = Course
+    template_name = 'courses/course/detail.html'
+
+    # The enroll button form to the course overview page.
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        context['enroll_form'] = CourseEnrollForm(
+            initial={'course': self.object})
+        return context
+
