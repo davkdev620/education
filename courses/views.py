@@ -15,6 +15,7 @@ from django.db.models import Count
 from .models import Subject
 from django.views.generic.detail import DetailView
 from students.forms import CourseEnrollForm
+from django.core.cache import cache
 
 
 class OwnerMixin(object):
@@ -40,7 +41,7 @@ class OwnerCourseEditMixin(OwnerCourseMixin, OwnerEditMixin):
 
 
 class ManageCourseListView(OwnerCourseMixin, ListView):
-    template_name = 'courses/manage/course/templates/courses/course/list.html'
+    template_name = 'courses/manage/course/list.html'
     permission_required = 'courses.view_course'
 
 
@@ -191,16 +192,32 @@ class CourseListView(TemplateResponseMixin, View):
     template_name = 'courses/course/list.html'
 
     def get(self, request, subject=None):
-        # Retrieve all subjects, aggregation function to include the total number of courses for each subject.
-        subjects = Subject.objects.annotate(
-            total_courses=Count('courses'))
+        # Caching.
+        subjects = cache.get('all_subjects')
+        if not subjects:
+            # Retrieve all subjects, aggregation function to include the total number of courses for each subject.
+            subjects = Subject.objects.annotate(
+                total_courses=Count('courses'))
+            # Set caching.
+            cache.set('all_subjects', subjects)
 
-        courses = Course.objects.annotate(
+        all_courses = Course.objects.annotate(
             total_modules=Count('modules'))
 
         if subject:
             subject = get_object_or_404(Subject, slug=subject)
-            courses = courses.filter(subject=subject)
+            key = f'subject_{subject.id}_courses'
+            courses = cache.get(key)
+            if not courses:
+                courses = all_courses.filter(subject=subject)
+                cache.set(key, courses)
+        else:
+            courses = cache.get('all_courses')
+            if not courses:
+                courses = all_courses
+                # Caching.
+                cache.set('all_courses', courses)
+
         # Render the objects to a template and return an HTTP response.
         return self.render_to_response({'subjects': subjects,
                                         'subject': subject,
